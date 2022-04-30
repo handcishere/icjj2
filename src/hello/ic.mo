@@ -1,81 +1,216 @@
-// This is a generated Motoko binding.
-// Please use `import service "ic:canister_id"` instead to call canisters on the IC if possible.
+import IC "./ic";
+import Array "mo:base/Array";
+import Buffer "mo:base/Buffer";
+import Deque "mo:base/Deque";
+import List "mo:base/List";
+import Nat "mo:base/Nat";
+import Option "mo:base/Option";
+import TrieMap "mo:base/TrieMap";
+import TrieSet "mo:base/TrieSet";
+import Hash "mo:base/Hash";
+import Text "mo:base/Text";
+import Cycles "mo:base/ExperimentalCycles";
+import Result "mo:base/Result";
+import Principal "mo:base/Principal";
 
-module {
-  public type canister_id = Principal;
-  public type canister_settings = {
-    freezing_threshold : ?Nat;
-    controllers : ?[Principal];
-    memory_allocation : ?Nat;
-    compute_allocation : ?Nat;
-  };
-  public type definite_canister_settings = {
-    freezing_threshold : Nat;
-    controllers : [Principal];
-    memory_allocation : Nat;
-    compute_allocation : Nat;
-  };
-  public type http_header = { value : Text; name : Text };
-  public type http_request_error = {
-    #dns_error;
-    #no_consensus;
-    #transform_error;
-    #unreachable;
-    #bad_tls;
-    #conn_timeout;
-    #invalid_url;
-    #timeout;
-  };
-  public type http_response = {
-    status : Nat;
-    body : [Nat8];
-    headers : [http_header];
-  };
-  public type user_id = Principal;
-  public type wasm_module = [Nat8];
-  public type Self = actor {
-    canister_status : shared { canister_id : canister_id } -> async {
-        status : { #stopped; #stopping; #running };
-        memory_size : Nat;
-        cycles : Nat;
-        settings : definite_canister_settings;
-        module_hash : ?[Nat8];
-      };
-    create_canister : shared { settings : ?canister_settings } -> async {
+shared(install) actor class icjj2(m : Nat, member : [Principal]) = this {
+    private type canister_id = IC.canister_id;
+    private type Oprate = {
+        #InstallCode;
+        #StopCanister;
+    };
+    private type InstallCodeArgs = {
+        wsm : [Nat8];
         canister_id : canister_id;
-      };
-    delete_canister : shared { canister_id : canister_id } -> async ();
-    deposit_cycles : shared { canister_id : canister_id } -> async ();
-    http_request : shared {
-        url : Text;
-        method : { #get };
-        body : ?[Nat8];
-        transform : ?{
-          #function : shared query http_response -> async http_response;
+    };
+    private type StopCanisterArgs = {
+        canister_id : canister_id;
+    };
+    private type ProposalAgrs = {
+        oprate : Oprate;
+        memo : Text;
+        install_code_args : ?InstallCodeArgs;
+        stop_canister_args : ?StopCanisterArgs;
+    };
+    private type Proposal = {
+        args : ProposalAgrs;
+        done : Bool;
+        var agreed : TrieSet.Set<Principal>;
+    };
+    private type Error = {
+        #PermissionDenied;
+        #ProposalNotFound;
+        #MemberOnly;
+        #ArgsError;
+        #RestrictedCanister;
+    };
+    
+    private let ic : IC.Self = actor "aaaaa-aa";
+
+    private stable var canisters_entires : [Principal] = [];
+    private var canisters = TrieSet.fromArray<Principal>(canisters_entires, Principal.hash, Principal.equal);
+    private stable var members : [Principal] = [];
+    private var member_set = TrieSet.fromArray<Principal>(member, Principal.hash, Principal.equal);
+    private stable var N = member.size();
+    private stable var M = do { 
+        if (m >= members.size()) {
+            members.size()
+        } 
+        else { 
+            m
         };
-        headers : [http_header];
-      } -> async { #Ok : http_response; #Err : ?http_request_error };
-    install_code : shared {
-        arg : [Nat8];
-        wasm_module : wasm_module;
-        mode : { #reinstall; #upgrade; #install };
-        canister_id : canister_id;
-      } -> async ();
-    provisional_create_canister_with_cycles : shared {
-        settings : ?canister_settings;
-        amount : ?Nat;
-      } -> async { canister_id : canister_id };
-    provisional_top_up_canister : shared {
-        canister_id : canister_id;
-        amount : Nat;
-      } -> async ();
-    raw_rand : shared () -> async [Nat8];
-    start_canister : shared { canister_id : canister_id } -> async ();
-    stop_canister : shared { canister_id : canister_id } -> async ();
-    uninstall_code : shared { canister_id : canister_id } -> async ();
-    update_settings : shared {
-        canister_id : Principal;
-        settings : canister_settings;
-      } -> async ();
-  }
-}
+    };
+  
+    private stable var pId : Nat = 1;
+    private stable var proposal_entries : [var (Nat,Proposal)]     = [var];
+    private var proposals = TrieMap.fromEntries<Nat, Proposal>(proposal_entries.vals(), Nat.equal, Hash.hash);
+    private stable var restricted_canister_entries : [Principal] = [];
+    private var restricted_canisters = TrieSet.fromArray<Principal>(member, Principal.hash, Principal.equal);
+
+    public shared({caller}) func setRestrictedCanister(arg : Bool,id : Principal) : async Result.Result<() , Error> {
+        if(not TrieSet.mem(member_set,caller,Principal.hash(caller),Principal.equal)){
+            return #err(#MemberOnly);
+        };
+        if(arg){
+            ignore TrieSet.put<Principal>(restricted_canisters,id,Principal.hash(id),Principal.equal);
+        }else{
+            ignore TrieSet.delete<Principal>(restricted_canisters,id,Principal.hash(id),Principal.equal);
+        };
+        return #ok();
+    };
+    
+    public shared({caller}) func issuedProposal(args : ProposalAgrs) : async Result.Result<() , Error> {
+        if(not TrieSet.mem(member_set,caller,Principal.hash(caller),Principal.equal)){
+            return #err(#MemberOnly);
+        };
+        proposals.put(pId,{
+            args=args; 
+            done=false; 
+            var agreed=TrieSet.empty<Principal>();
+        });
+        pId+=1;
+        return #ok();
+    };
+    public shared({caller}) func voteProposal(proposalId:Nat,vote : Bool) : async Result.Result<() , Error> {
+         if(not TrieSet.mem(member_set,caller,Principal.hash(caller),Principal.equal)){
+            return #err(#MemberOnly);
+        };
+        switch(proposals.get(proposalId)){
+            case null{
+                return #err(#ProposalNotFound);
+            };
+            case (?v){
+                if(vote){
+                    let set =TrieSet.put<Principal>(v.agreed,caller,Principal.hash(caller),Principal.equal);
+                    v.agreed := set;
+                    proposals.put(proposalId,v);
+                }
+                else{
+                    let set =TrieSet.delete<Principal>(v.agreed,caller,Principal.hash(caller),Principal.equal);
+                    v.agreed := set;
+                    proposals.put(proposalId,v);
+                };
+                return #ok();
+            };
+        };
+    };
+    
+ 
+    public shared({caller}) func executeProposal(proposalId:Nat) : async Result.Result<() , Error> {
+         if(not TrieSet.mem(member_set,caller,Principal.hash(caller),Principal.equal)){
+            return #err(#MemberOnly);
+        };
+        switch(proposals.get(proposalId)){
+            case null{
+                return #err(#ProposalNotFound);
+            };
+            case (?v){
+                if(TrieSet.size<Principal>(v.agreed)>=M){ //投票人数足够
+                    //do someting for executing the proposal
+                    switch(v.args.oprate){
+                        case(#InstallCode){
+                            switch(v.args.install_code_args){
+                                case null{
+                                    return #err(#ArgsError);
+                                };
+                                case (?install_args){
+                                   ignore await install_code(install_args.wsm,install_args.canister_id);
+                                };
+                            };
+                        };
+                        case(#StopCanister){
+                            switch(v.args.stop_canister_args){
+                                case null{
+                                    return #err(#ArgsError);
+                                };
+                                case (?stop_canister_args){
+                                   ignore await stop_canister(stop_canister_args.canister_id);
+                                };
+                            };
+                        };
+                    };
+                };
+                return #ok();
+            };
+        };
+        return #ok();
+    };
+    public shared({caller}) func create_canister() :  async Result.Result<canister_id, Error> {
+         if(not TrieSet.mem(member_set,caller,Principal.hash(caller),Principal.equal)){
+            return #err(#MemberOnly);
+        };
+        let settings = {
+            freezing_threshold = null;
+            controllers = ?[Principal.fromActor(this)];
+            memory_allocation = null;
+            compute_allocation = null;
+        };
+        let res = await ic.create_canister({ settings = ?settings;});
+        ignore TrieSet.put<Principal>(canisters,res.canister_id,Principal.hash(res.canister_id),Principal.equal);
+        #ok(res.canister_id)
+    };
+
+    public shared({caller}) func install_code(wsm : [Nat8], canister_id : canister_id) : async Result.Result<Text, Error> {
+        if(TrieSet.mem(restricted_canisters,canister_id,Principal.hash(caller),Principal.equal)){
+            return #err(#RestrictedCanister);
+        };
+         if(not TrieSet.mem(member_set,caller,Principal.hash(caller),Principal.equal)){
+            return #err(#MemberOnly);
+        };
+        await ic.install_code({ 
+            arg = [];
+            wasm_module = wsm;
+            mode = #install;
+            canister_id = canister_id;
+        });
+        #ok("ok")
+    };
+
+    public shared({caller}) func start_canister(canister_id : canister_id) : async Result.Result<Text, Error> {
+         if(not TrieSet.mem(member_set,caller,Principal.hash(caller),Principal.equal)){
+            return #err(#MemberOnly);
+        };
+        await ic.start_canister({ canister_id = canister_id;});
+        #ok("ok")
+    };
+
+    public shared({caller}) func stop_canister(canister_id : canister_id) : async Result.Result<Text, Error> {
+        if(TrieSet.mem(restricted_canisters,canister_id,Principal.hash(caller),Principal.equal)){
+            return #err(#RestrictedCanister);
+        };
+        if(not TrieSet.mem(member_set,caller,Principal.hash(caller),Principal.equal)){
+            return #err(#MemberOnly);
+        };
+        await ic.stop_canister({ canister_id = canister_id;});
+        #ok("ok")
+    };
+
+    public shared({caller}) func delete_canister(canister_id : canister_id) : async Result.Result<Text, Error> {
+         if(not TrieSet.mem(member_set,caller,Principal.hash(caller),Principal.equal)){
+            return #err(#MemberOnly);
+        };
+        await ic.delete_canister({ canister_id = canister_id;});
+        #ok("ok")
+    };
+
+}; 
