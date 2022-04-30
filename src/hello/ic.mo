@@ -13,7 +13,7 @@ import Cycles "mo:base/ExperimentalCycles";
 import Result "mo:base/Result";
 import Principal "mo:base/Principal";
 
-shared(install) actor class icjj2(m : Nat, member : [Principal]) = this {
+shared(installer) actor class icjj2(m : Nat, member : [Principal]) = this {
     private type canister_id = IC.canister_id;
     private type Oprate = {
         #InstallCode;
